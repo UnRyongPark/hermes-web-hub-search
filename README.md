@@ -65,9 +65,14 @@ In any Hermes chat (no model turn, no terminal needed):
 /hubsearch_log 20       # last 20 searches
 ```
 
-Telegram only accepts `[a-z0-9_]` in command names, so a hyphen is impossible —
-underscore is the separator. The 60-slot BotCommand menu is usually already full
-and plugin commands sort last (they get cut), so name them explicitly:
+Register plugin commands **hyphenated** (`hubsearch-stats`). Telegram accepts only `[a-z0-9_]`,
+so the menu sanitizer renders them as `/hubsearch_stats`, and the gateway turns underscores
+back into hyphens before resolving a plugin command. Registering the underscored name instead
+breaks that round trip: the lookup asks for `hubsearch-stats`, finds nothing, and answers
+"Unknown command /hubsearch_stats" — even after a restart, because the name itself is wrong.
+
+The 60-slot BotCommand menu is usually already full and plugin commands sort last (they get
+cut), so name them explicitly (priority matching uses the sanitized, underscored form):
 
 ```bash
 hermes config set platforms.telegram.extra.command_menu.priority '["hubsearch_stats","hubsearch_log"]'

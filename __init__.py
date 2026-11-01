@@ -45,16 +45,23 @@ def _log_command(raw_args: str) -> str:
 
 
 def register(ctx) -> None:
-    """Register the hub search provider plus ``/hubsearch_stats`` and ``/hubsearch_log``."""
+    """Register the hub search provider plus ``/hubsearch-stats`` and ``/hubsearch-log``.
+
+    Register the hyphenated spelling: Telegram accepts only ``[a-z0-9_]`` in command names, so
+    the menu sanitizer shows ``/hubsearch_stats``, and the gateway turns underscores back into
+    hyphens before looking a plugin command up (``run_inbound_hooks._hm_dispatch_plugin_command``).
+    Registering the underscored form instead breaks that round trip — the lookup then asks for
+    ``hubsearch-stats`` and answers "Unknown command".
+    """
     ctx.register_web_search_provider(HubSearchProvider())
     ctx.register_command(
-        "hubsearch_stats",
+        "hubsearch-stats",
         _stats_command,
         description="Hub search usage statistics (optionally: /hubsearch_stats 30)",
         args_hint="[days]",
     )
     ctx.register_command(
-        "hubsearch_log",
+        "hubsearch-log",
         _log_command,
         description="Recent hub searches (optionally: /hubsearch_log 20)",
         args_hint="[n]",
