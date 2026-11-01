@@ -60,9 +60,9 @@ The web dashboard and log viewer are not built yet — `stats --json` is their i
 In any Hermes chat (no model turn, no terminal needed):
 
 ```
-/hubstats          # 7-day window
-/hubstats 30       # 30-day window
-/hublog 20         # last 20 searches
+/hubsearchstats        # 7-day window
+/hubsearchstats 30     # 30-day window
+/hubsearchlog 20       # last 20 searches
 ```
 
 Or from a shell:
