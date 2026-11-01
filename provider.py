@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from agent.web_search_provider import WebSearchProvider, get_provider_env
 
@@ -48,18 +49,46 @@ def _profile_env_files() -> list[Path]:
     return files
 
 
+def _key_env_candidates() -> list[str]:
+    """Env vars to try, most specific first.
+
+    Every profile names its hub key differently (``OPENCODEX_HERMES_GPT_API_KEY``,
+    ``OPENCODEX_BEAVER_API_KEY``, ...), so the profile's own provider block — the one
+    pointing at the hub origin — is consulted for its ``key_env``.
+    """
+    candidates = ["HUB_SEARCH_KEY", "OPENCODEX_HERMES_GPT_API_KEY"]
+    try:
+        from hermes_cli.config import load_config
+
+        host = urlparse(os.environ.get("HUB_SEARCH_BASE", _DEFAULT_BASE)).netloc
+        providers = (load_config() or {}).get("providers") or {}
+        for block in providers.values():
+            if not isinstance(block, dict):
+                continue
+            api = str(block.get("api") or "")
+            key_env = str(block.get("key_env") or "")
+            if key_env and host and urlparse(api).netloc == host and key_env not in candidates:
+                candidates.insert(0, key_env)
+    except Exception as exc:  # config layer unavailable (stripped install, tests)
+        logger.debug("hub-search config lookup failed: %s", exc)
+    return candidates
+
+
 def _api_key() -> str:
-    value = get_provider_env("OPENCODEX_HERMES_GPT_API_KEY")
-    if value:
-        return value
-    for path in _profile_env_files():
-        try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                match = re.match(r"^OPENCODEX_HERMES_GPT_API_KEY=(.*)$", line.strip())
-                if match:
-                    return match.group(1).strip().strip('"').strip("'")
-        except OSError:
-            continue
+    for var in _key_env_candidates():
+        value = get_provider_env(var)
+        if value:
+            return value
+        for path in _profile_env_files():
+            try:
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    match = re.match(rf"^{re.escape(var)}=(.*)$", line.strip())
+                    if match:
+                        found = match.group(1).strip().strip('"').strip("'")
+                        if found:
+                            return found
+            except OSError:
+                continue
     return ""
 
 
