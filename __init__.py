@@ -17,7 +17,7 @@ def _parse_int(raw: str, default: int) -> int:
 
 
 def _stats_command(raw_args: str) -> str:
-    """``/hubsearchstats [days]`` — totals, latency, per-day and per-profile breakdown."""
+    """``/hubsearch_stats [days]`` — totals, latency, per-day and per-profile breakdown."""
     from .cli import load_rows, render, summarize
 
     days = _parse_int(raw_args, 7)
@@ -26,7 +26,7 @@ def _stats_command(raw_args: str) -> str:
 
 
 def _log_command(raw_args: str) -> str:
-    """``/hubsearchlog [n]`` — the most recent n searches, one line each."""
+    """``/hubsearch_log [n]`` — the most recent n searches, one line each."""
     from .cli import load_rows
 
     tail = _parse_int(raw_args, 10)
@@ -45,17 +45,17 @@ def _log_command(raw_args: str) -> str:
 
 
 def register(ctx) -> None:
-    """Register the hub search provider plus ``/hubsearchstats`` and ``/hubsearchlog``."""
+    """Register the hub search provider plus ``/hubsearch_stats`` and ``/hubsearch_log``."""
     ctx.register_web_search_provider(HubSearchProvider())
     ctx.register_command(
-        "hubsearchstats",
+        "hubsearch_stats",
         _stats_command,
-        description="Hub search usage statistics (optionally: /hubsearchstats 30)",
+        description="Hub search usage statistics (optionally: /hubsearch_stats 30)",
         args_hint="[days]",
     )
     ctx.register_command(
-        "hubsearchlog",
+        "hubsearch_log",
         _log_command,
-        description="Recent hub searches (optionally: /hubsearchlog 20)",
+        description="Recent hub searches (optionally: /hubsearch_log 20)",
         args_hint="[n]",
     )

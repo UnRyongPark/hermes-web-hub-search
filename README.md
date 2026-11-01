@@ -60,10 +60,22 @@ The web dashboard and log viewer are not built yet — `stats --json` is their i
 In any Hermes chat (no model turn, no terminal needed):
 
 ```
-/hubsearchstats        # 7-day window
-/hubsearchstats 30     # 30-day window
-/hubsearchlog 20       # last 20 searches
+/hubsearch_stats        # 7-day window
+/hubsearch_stats 30     # 30-day window
+/hubsearch_log 20       # last 20 searches
 ```
+
+Telegram only accepts `[a-z0-9_]` in command names, so a hyphen is impossible —
+underscore is the separator. The 60-slot BotCommand menu is usually already full
+and plugin commands sort last (they get cut), so name them explicitly:
+
+```bash
+hermes config set platforms.telegram.extra.command_menu.priority '["hubsearch_stats","hubsearch_log"]'
+```
+
+`set_my_commands` is pushed once at adapter connect, so after enabling the plugin on a
+running gateway push the menu (or restart). `scripts/push_menu.py` does that and reads
+the result back with `get_my_commands`.
 
 Or from a shell:
 
