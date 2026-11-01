@@ -1,6 +1,8 @@
 # hermes-web-hub-search
 
-Hermes Agent web-search provider that runs every search **on the OpenAI subscription**
+**When you put OpenCodex behind Hermes, this plugin hands Hermes' search to Codex.**
+
+It is a Hermes Agent web-search provider: every search runs **on the OpenAI subscription**
 through an OpenCodex hub, instead of declaring OpenAI's hosted tool and leaving the
 client-side path broken.
 
@@ -36,13 +38,24 @@ done
 hermes config set web.search_backend hub-search
 ```
 
-Restart the gateway for the change to take effect.
+Reload the running gateway's plugins instead of restarting it:
+
+```bash
+hermes plugins disable web/hub-search && hermes plugins enable web/hub-search
+```
 
 ## Usage statistics
 
 Every search appends one JSONL line (query, profile, ok, result count, seconds, error) to
-`~/.hermes/shared/hub-search/usage.jsonl`, shared across all profiles and skipped silently
-if the file cannot be written.
+`~/.hermes/shared/hub-search/usage-YYYY-MM.jsonl` — monthly files, shared across profiles,
+skipped silently when the log cannot be written. Months that end before
+`HUB_SEARCH_RETENTION_DAYS` (default 180, `0` disables) are pruned once a day on write.
+
+`fetch_limit` is the **fetch** count Hermes asks the provider for, not the number the caller
+requested: Hermes buckets the ask (2 → 10) so near-identical limits share one cached search,
+then slices the caller's share afterwards. `results` is what the provider actually returned.
+
+The web dashboard and log viewer are not built yet — `stats --json` is their intended input.
 
 ```bash
 ln -sfn ~/repos/hermes-web-hub-search/cli.py ~/.local/bin/hub-search

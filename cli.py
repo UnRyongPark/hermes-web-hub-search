@@ -21,29 +21,50 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+def log_dir() -> Path:
+    override = os.environ.get("HUB_SEARCH_LOG", "").strip()
+    if override:
+        return Path(override).expanduser().parent
+    return Path.home() / ".hermes" / "shared" / "hub-search"
+
+
+def log_files(directory: Path | None = None) -> list[Path]:
+    """Monthly files in chronological order, plus a legacy single-file log if present."""
+    directory = directory or log_dir()
+    files = sorted(directory.glob("usage-*.jsonl"))
+    legacy = directory / "usage.jsonl"
+    if legacy.exists():
+        files.insert(0, legacy)
+    return files
+
+
 def log_path() -> Path:
+    """The file currently being appended to (for messages)."""
     override = os.environ.get("HUB_SEARCH_LOG", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".hermes" / "shared" / "hub-search" / "usage.jsonl"
+    return log_dir() / f"usage-{datetime.now(timezone.utc).strftime('%Y-%m')}.jsonl"
 
 
 def load_rows(path: Path | None = None) -> list[dict[str, Any]]:
-    path = path or log_path()
+    """Read every rotated log (or just ``path`` when given) and return rows oldest first."""
+    paths = [path] if path is not None else log_files()
     rows: list[dict[str, Any]] = []
-    if not path.exists():
-        return rows
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(row, dict):
-                rows.append(row)
+    for one in paths:
+        if not one.exists():
+            continue
+        with one.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    rows.sort(key=lambda r: str(r.get("ts") or ""))
     return rows
 
 

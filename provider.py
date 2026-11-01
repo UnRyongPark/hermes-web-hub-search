@@ -21,7 +21,7 @@ import re
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -29,6 +29,8 @@ from urllib.parse import urlparse
 from agent.web_search_provider import WebSearchProvider, get_provider_env
 
 logger = logging.getLogger(__name__)
+
+_pruned_on: date | None = None
 
 _DEFAULT_BASE = "http://192.168.1.116:10100"
 _DEFAULT_MODEL = "combo/ds41f"
@@ -131,10 +133,50 @@ def _search_fail(error: str) -> dict[str, Any]:
 
 
 def _usage_log_path() -> Path:
+    """Monthly log file, rotated by month and pruned by age (see ``_prune_usage``)."""
     override = os.environ.get("HUB_SEARCH_LOG", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".hermes" / "shared" / "hub-search" / "usage.jsonl"
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m")
+    return _usage_dir() / f"usage-{stamp}.jsonl"
+
+
+def _usage_dir() -> Path:
+    override = os.environ.get("HUB_SEARCH_LOG", "").strip()
+    if override:
+        return Path(override).expanduser().parent
+    return Path.home() / ".hermes" / "shared" / "hub-search"
+
+
+def _prune_usage(directory: Path) -> None:
+    """Delete rotated logs older than HUB_SEARCH_RETENTION_DAYS (default 180; 0 disables).
+
+    Runs at most once per process per day so the append path stays cheap.
+    """
+    global _pruned_on
+    today = datetime.now(timezone.utc).date()
+    if _pruned_on == today:
+        return
+    _pruned_on = today
+    try:
+        keep_days = int(os.environ.get("HUB_SEARCH_RETENTION_DAYS", "180"))
+    except ValueError:
+        keep_days = 180
+    if keep_days <= 0:
+        return
+    cutoff = today - timedelta(days=keep_days)
+    for old in directory.glob("usage-*.jsonl"):
+        try:
+            stamp = datetime.strptime(old.stem.split("-", 1)[1], "%Y-%m").date()
+        except (IndexError, ValueError):
+            continue
+        # Keep the whole month that contains the cutoff; drop months that end before it.
+        month_end = (stamp.replace(day=28) + timedelta(days=5)).replace(day=1) - timedelta(days=1)
+        if month_end < cutoff:
+            try:
+                old.unlink()
+            except OSError:
+                pass
 
 
 def _profile_name() -> str:
@@ -157,7 +199,9 @@ def _log_usage(query: str, limit: int, result: dict[str, Any], elapsed: float) -
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile": _profile_name(),
         "query": query[:300],
-        "limit": int(limit),
+        # Hermes asks for a bucketed fetch count (e.g. a request for 2 arrives as 10) and
+        # slices the caller's share afterwards, so this is the fetch size, not the ask.
+        "fetch_limit": int(limit),
         "ok": ok,
         "results": hits,
         "elapsed": round(elapsed, 2),
@@ -167,6 +211,7 @@ def _log_usage(query: str, limit: int, result: dict[str, Any], elapsed: float) -
     try:
         path = _usage_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        _prune_usage(path.parent)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as exc:
