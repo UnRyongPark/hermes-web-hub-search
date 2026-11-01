@@ -21,6 +21,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -129,6 +130,49 @@ def _search_fail(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
+def _usage_log_path() -> Path:
+    override = os.environ.get("HUB_SEARCH_LOG", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".hermes" / "shared" / "hub-search" / "usage.jsonl"
+
+
+def _profile_name() -> str:
+    try:
+        from hermes_cli.config import get_config_path
+
+        return get_config_path().parent.name or "default"
+    except Exception:
+        return os.environ.get("HERMES_PROFILE", "").strip() or "default"
+
+
+def _log_usage(query: str, limit: int, result: dict[str, Any], elapsed: float) -> None:
+    """Append one JSONL line per search for ``hub-search stats`` / dashboards.
+
+    Best effort: analytics must never break a search.
+    """
+    ok = bool(result.get("success"))
+    hits = len(((result.get("data") or {}).get("web") or [])) if ok else 0
+    entry: dict[str, Any] = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "profile": _profile_name(),
+        "query": query[:300],
+        "limit": int(limit),
+        "ok": ok,
+        "results": hits,
+        "elapsed": round(elapsed, 2),
+    }
+    if not ok:
+        entry["error"] = str(result.get("error") or "")[:200]
+    try:
+        path = _usage_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.debug("hub-search usage log failed: %s", exc)
+
+
 class HubSearchProvider(WebSearchProvider):
     """Search through the hub's hosted OpenAI ``web_search`` tool."""
 
@@ -149,6 +193,16 @@ class HubSearchProvider(WebSearchProvider):
         return bool(_api_key())
 
     def search(self, query: str, limit: int = 5) -> dict[str, Any]:
+        started = time.time()
+        try:
+            result = self._run_search(query, limit)
+        except Exception as exc:  # never let a provider bug escape into the tool layer
+            logger.warning("hub-search crashed: %s", exc)
+            result = _search_fail(f"hub search crashed: {exc}")
+        _log_usage(query, limit, result, time.time() - started)
+        return result
+
+    def _run_search(self, query: str, limit: int = 5) -> dict[str, Any]:
         key = _api_key()
         if not key:
             return _search_fail("OPENCODEX_HERMES_GPT_API_KEY is not set for this profile")

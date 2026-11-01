@@ -38,6 +38,30 @@ hermes config set web.search_backend hub-search
 
 Restart the gateway for the change to take effect.
 
+## Usage statistics
+
+Every search appends one JSONL line (query, profile, ok, result count, seconds, error) to
+`~/.hermes/shared/hub-search/usage.jsonl`, shared across all profiles and skipped silently
+if the file cannot be written.
+
+```bash
+ln -sfn ~/repos/hermes-web-hub-search/cli.py ~/.local/bin/hub-search
+hub-search stats              # totals, success rate, p50/p90 latency, per-day bars, top queries
+hub-search stats --days 30    # wider window (totals always cover the whole log)
+hub-search stats --json       # machine-readable, for a dashboard
+hub-search log --tail 20      # raw recent searches, one line each
+```
+
+```
+hub-search: 4 searches — 3 ok, 1 failed (75.0% success)
+latency: p50 12.3s  p90 34.4s  max 34.4s  mean 19.0s
+
+last 7 days
+  2026-11-01     4   75.0%  ####
+```
+
+Roadmap: a small web dashboard and a log viewer over the same JSONL.
+
 ## Configuration
 
 | env | default | meaning |
@@ -45,6 +69,8 @@ Restart the gateway for the change to take effect.
 | `HUB_SEARCH_BASE` | `http://192.168.1.116:10100` | OpenCodex hub origin |
 | `HUB_SEARCH_MODEL` | `combo/ds41f` | model that carries the hosted tool call |
 | `HUB_SEARCH_TIMEOUT` | `50` | soft deadline in seconds |
+| `HUB_SEARCH_LOG` | `~/.hermes/shared/hub-search/usage.jsonl` | usage log path |
+| `HUB_SEARCH_KEY` | _(profile provider block)_ | explicit hub key override |
 
 Credentials: `OPENCODEX_HERMES_GPT_API_KEY` from the environment, the active profile's
 `.env`, or `~/.hermes/.env`.
