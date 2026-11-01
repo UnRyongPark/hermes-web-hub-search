@@ -1,0 +1,9 @@
+name: web-hub-search
+version: 1.0.0
+description: "Web search on the OpenAI subscription through the OpenCodex hub's hosted web_search tool."
+author: Brian Park
+kind: backend
+provides_web_providers:
+  - hub-search
+requires_env:
+  - OPENCODEX_HERMES_GPT_API_KEY
