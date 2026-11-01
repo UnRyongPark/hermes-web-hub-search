@@ -57,6 +57,16 @@ then slices the caller's share afterwards. `results` is what the provider actual
 
 The web dashboard and log viewer are not built yet — `stats --json` is their intended input.
 
+In any Hermes chat (no model turn, no terminal needed):
+
+```
+/hubstats          # 7-day window
+/hubstats 30       # 30-day window
+/hublog 20         # last 20 searches
+```
+
+Or from a shell:
+
 ```bash
 ln -sfn ~/repos/hermes-web-hub-search/cli.py ~/.local/bin/hub-search
 hub-search stats              # totals, success rate, p50/p90 latency, per-day bars, top queries
