@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Default carrier stays on the hub's `openai` provider (`gpt-6-luna`): searches must draw on the
+  ChatGPT subscription. The `opencode-go` lane is measurably faster (11-15 s vs 20-35 s for ten
+  results) but bills on a separate plan, so it is documented as opt-in rather than shipped as the
+  default. `HUB_SEARCH_MAX_RESULTS` default 15 -> 12 to trim output tokens on the slower lane.
+
 ## 1.2.0
 
 - One request now returns the whole retrieved set. The instructions ask the carrier for every

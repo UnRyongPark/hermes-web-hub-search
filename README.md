@@ -107,7 +107,7 @@ Roadmap: a small web dashboard and a log viewer over the same JSONL.
 | env | default | meaning |
 | --- | --- | --- |
 | `HUB_SEARCH_BASE` | `http://192.168.1.116:10100` | OpenCodex hub origin |
-| `HUB_SEARCH_MODEL` | `opencode-go/gpt-6-luna` | model that carries the hosted tool call — must be a native passthrough (see Trade-offs) |
+| `HUB_SEARCH_MODEL` | `gpt-6-luna` | model that carries the hosted tool call — must be a native passthrough (see Trade-offs) |
 | `HUB_SEARCH_TIMEOUT` | `90` | soft deadline in seconds, measured from the request |
 | `HUB_SEARCH_LOG` | `~/.hermes/shared/hub-search/usage.jsonl` | usage log path |
 | `HUB_SEARCH_KEY` | _(profile provider block)_ | explicit hub key override |
@@ -117,7 +117,7 @@ Credentials: `OPENCODEX_HERMES_GPT_API_KEY` from the environment, the active pro
 
 ## Trade-offs
 
-- **Latency depends entirely on the carrier model's route, not on the query.** The default
+- **Latency depends entirely on the carrier model's route and lane, not on the query.** The default
   `HUB_SEARCH_MODEL` must therefore be a model the hub serves on a *native passthrough* route
   (`gpt-*`), never a `combo/*` alias.
   - `combo/ds41f` is translated, so the hub cannot let upstream run the hosted tool. It runs an
@@ -138,9 +138,12 @@ Credentials: `OPENCODEX_HERMES_GPT_API_KEY` from the environment, the active pro
   cited subset yielded 5 rows however many the caller wanted; instructing it to return every
   distinct hit the tool produced filled the same single call with 10-15. So one request covers
   both the fast path and the wide path: 10-15 s for 10 results, 10-13 s for 5.
-- **Carrier choice is worth re-measuring per lane.** The same `gpt-6-luna` served over the hub's
-  `openai` provider took 20-27 s for the same ten results that `opencode-go` returned in 11-15 s,
-  so the default points at the `opencode-go` lane. Re-time both when either lane changes.
+- **Lane is a billing decision before it is a speed decision.** The default stays on the hub's
+  `openai` provider: that lane draws on the ChatGPT subscription, which is the whole point of this
+  provider. It costs 20-35 s for ten results. The `opencode-go` (Zen) lane served the same ten
+  results in 11-15 s, but pays per call on a separate plan, so it is opt-in only — set
+  `HUB_SEARCH_MODEL=opencode-go/gpt-6-luna` and accept the separate bill. Re-time both lanes
+  whenever either changes; never switch lanes for latency alone.
 - **Env knobs are dotenv-first.** The gateway copies `.env` into `os.environ` at boot, where it
   outranks the file, and `load_env()` memoises the parse. The provider drops that memo and reads
   dotenv-first so retuning takes effect on the next search, not the next gateway restart.
