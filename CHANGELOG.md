@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.2
+
+- Salvage sources from prose replies. The carrier is a chat model and sometimes answers the query
+  instead of emitting the JSON array (2 of 27 searches, 5-6 s each); the parser scored those as
+  zero results and the search failed outright. URLs in a cited answer are now recovered
+  (markdown links and bare URLs, with the surrounding text as the snippet), so that case returns
+  a real result set instead of an error. Verified live: the failing query now returns 11 rows
+  with `mode=salvage` in one call.
+- Name the failure. "hub returned no results" covered an upstream stall (no output for the whole
+  deadline), a prose reply with no links, and a genuinely empty result set. Those are now
+  distinct errors, and the log records `mode=json|salvage|none` per search.
+
 ## 1.2.1
 
 - Default carrier stays on the hub's `openai` provider (`gpt-6-luna`): searches must draw on the

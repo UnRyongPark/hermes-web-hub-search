@@ -148,6 +148,54 @@ def _parse_array(text: str) -> list[dict[str, str]]:
     return out
 
 
+_MD_LINK_RE = re.compile(r"\[([^\]]{1,200})\]\((https?://[^\s)]+)\)")
+_BARE_URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
+
+
+def _salvage_rows(text: str) -> list[dict[str, str]]:
+    """Pull every URL out of a prose answer.
+
+    The carrier is a chat model, so now and then it answers the question instead of emitting the
+    JSON array — measured as 2 of 27 searches, each a fast 5-6 s reply that the parser scored as
+    zero results. A cited answer still carries real sources, so recovering them turns a hard
+    failure into a thin but honest result set.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    spans: list[tuple[int, int, str, str]] = []
+    for match in _MD_LINK_RE.finditer(text):
+        spans.append((match.start(), match.end(), match.group(1).strip(), match.group(2)))
+    linked = [(start, end) for start, end, _, _ in spans]
+    for match in _BARE_URL_RE.finditer(text):
+        if any(start <= match.start() < end for start, end in linked):
+            continue
+        spans.append((match.start(), match.end(), "", match.group(0).rstrip(".,;:!?")))
+    spans.sort(key=lambda item: item[0])
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for start, end, title, url in spans:
+        url = _clean_url(url)
+        if not url.startswith("http") or url in seen:
+            continue
+        seen.add(url)
+        # Window around the link rather than a sentence: a cited answer often puts the link in
+        # trailing parens, so cutting at the sentence end inside the URL left "()" as the snippet.
+        window = text[max(0, start - 240) : end + 40]
+        snippet = re.sub(r"\[[^\]]*\]\([^)]*\)", "", window)
+        snippet = _BARE_URL_RE.sub("", snippet)
+        snippet = re.sub(r"\s+", " ", snippet).strip(" .-—()[]")
+        out.append(
+            {
+                "url": url,
+                "title": title or re.sub(r"^https?://", "", url).split("/")[0],
+                "snippet": snippet[:240],
+            }
+        )
+    return out
+
+
 def _search_fail(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
@@ -363,13 +411,22 @@ class HubSearchProvider(WebSearchProvider):
 
         raw_text = "".join(text)
         rows = _parse_array(raw_text)
+        mode = "json"
+        if not rows:
+            rows = _salvage_rows(raw_text)
+            mode = "salvage" if rows else "none"
         if not rows:
             rows = sources
         else:
             seen = {r["url"] for r in rows}
             rows += [s for s in sources if s["url"] not in seen]
         logger.info(
-            "hub-search '%s': text=%d chars parsed=%d sources=%d", query, len(raw_text), len(rows), len(sources)
+            "hub-search '%s': text=%d chars parsed=%d sources=%d mode=%s",
+            query,
+            len(raw_text),
+            len(rows),
+            len(sources),
+            mode,
         )
 
         hits: list[dict[str, Any]] = []
@@ -385,5 +442,10 @@ class HubSearchProvider(WebSearchProvider):
             if len(hits) >= limit:
                 break
         if not hits:
-            return _search_fail("hub returned no results")
+            # Say which failure it was. "No results" covered three different things — a stalled
+            # upstream, a prose reply with no links, and a genuinely empty result set — and only
+            # the last one means the query found nothing.
+            if not raw_text.strip():
+                return _search_fail(f"hub produced no output within {timeout:.0f}s (upstream stall)")
+            return _search_fail("hub replied without any URLs")
         return {"success": True, "data": {"web": hits}, "_model": model}

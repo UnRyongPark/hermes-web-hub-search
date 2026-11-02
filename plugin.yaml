@@ -1,5 +1,5 @@
 name: web-hub-search
-version: 1.2.1
+version: 1.2.2
 description: "Web search on the OpenAI subscription through the OpenCodex hub's hosted web_search tool."
 author: Brian Park
 kind: backend
