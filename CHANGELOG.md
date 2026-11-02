@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1
 
 - Default carrier stays on the hub's `openai` provider (`gpt-6-luna`): searches must draw on the
   ChatGPT subscription. The `opencode-go` lane is measurably faster (11-15 s vs 20-35 s for ten
