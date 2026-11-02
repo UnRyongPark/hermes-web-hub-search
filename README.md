@@ -107,8 +107,8 @@ Roadmap: a small web dashboard and a log viewer over the same JSONL.
 | env | default | meaning |
 | --- | --- | --- |
 | `HUB_SEARCH_BASE` | `http://192.168.1.116:10100` | OpenCodex hub origin |
-| `HUB_SEARCH_MODEL` | `combo/ds41f` | model that carries the hosted tool call |
-| `HUB_SEARCH_TIMEOUT` | `50` | soft deadline in seconds |
+| `HUB_SEARCH_MODEL` | `gpt-6-luna` | model that carries the hosted tool call — must be a native passthrough (see Trade-offs) |
+| `HUB_SEARCH_TIMEOUT` | `90` | soft deadline in seconds, measured from the request |
 | `HUB_SEARCH_LOG` | `~/.hermes/shared/hub-search/usage.jsonl` | usage log path |
 | `HUB_SEARCH_KEY` | _(profile provider block)_ | explicit hub key override |
 
@@ -117,9 +117,23 @@ Credentials: `OPENCODEX_HERMES_GPT_API_KEY` from the environment, the active pro
 
 ## Trade-offs
 
-- **Latency**: the hosted search itself takes 12–50 s upstream (it varies). Hermes'
-  tool-level memo cache serves repeats instantly; set `HUB_SEARCH_TIMEOUT` if a hard
-  ceiling is needed.
+- **Latency depends entirely on the carrier model's route, not on the query.** The default
+  `HUB_SEARCH_MODEL` must therefore be a model the hub serves on a *native passthrough* route
+  (`gpt-*`), never a `combo/*` alias.
+  - `combo/ds41f` is translated, so the hub cannot let upstream run the hosted tool. It runs an
+    agentic **sidecar loop** instead: a helper model (`webSearchSidecar.model`, here
+    `gpt-5.6-luna`) rewrites the query into variants, runs the hosted search once per variant,
+    formats the hits, and re-POSTs to the routed model. Hub log for one such turn:
+    `[web-search-loop] done — 3 searches, 2 iterations, 119367ms`. Observed range 35–150 s,
+    sources only materialising at 124 s. A 50 s ceiling cut that loop and reported
+    `hub returned no results` — the hub was healthy the whole time.
+  - A `gpt-*` carrier keeps the hosted tool native: upstream executes the search inside the same
+    turn. Measured end to end at 10–13 s, with the search itself finishing in 5–7 s.
+  - Trade-off: the native route returns fewer sources per query (2–5 observed) than the sidecar
+    loop (up to 20), at roughly a tenth of the wall time.
+- `HUB_SEARCH_TIMEOUT` must cover source arrival, not the answer. 90 s is ample for a native
+  carrier and still bounds a hung stream.
+- Hermes' tool-level memo cache serves repeats instantly.
 - **Snippets**: when the soft deadline fires, only source titles/URLs are returned.
 - **Cost**: a search is a full model round trip on the hub, so it is billed like any
   other call. With `openai-native` the same search was inlined into the answering turn.

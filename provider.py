@@ -9,7 +9,8 @@ tool call and programmatic callers (``execute_code``, subagents, cron).
 Env (optional):
   HUB_SEARCH_BASE   default http://192.168.1.116:10100
   HUB_SEARCH_MODEL  default combo/ds41f
-  HUB_SEARCH_TIMEOUT default 50 (seconds, soft deadline)
+  HUB_SEARCH_TIMEOUT default 180 (seconds, soft deadline; hub sidecar searches
+                    legitimately take 35-150s, see README)
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ _pruned_on: date | None = None
 
 _DEFAULT_BASE = "http://192.168.1.116:10100"
 _DEFAULT_MODEL = "combo/ds41f"
-_DEFAULT_TIMEOUT = 50.0
+_DEFAULT_TIMEOUT = 180.0
 
 _INSTRUCTIONS = (
     "You are a web search backend. Use the web search tool for the query, then reply with ONLY a "
@@ -251,9 +252,14 @@ class HubSearchProvider(WebSearchProvider):
         key = _api_key()
         if not key:
             return _search_fail("OPENCODEX_HERMES_GPT_API_KEY is not set for this profile")
-        base = os.environ.get("HUB_SEARCH_BASE", _DEFAULT_BASE).rstrip("/")
-        model = os.environ.get("HUB_SEARCH_MODEL", _DEFAULT_MODEL)
-        timeout = float(os.environ.get("HUB_SEARCH_TIMEOUT", _DEFAULT_TIMEOUT))
+        # get_provider_env reads the profile .env through the config layer on every call, so
+        # a timeout change lands in a running gateway without restarting it.
+        base = (get_provider_env("HUB_SEARCH_BASE") or _DEFAULT_BASE).rstrip("/")
+        model = get_provider_env("HUB_SEARCH_MODEL") or _DEFAULT_MODEL
+        try:
+            timeout = float(get_provider_env("HUB_SEARCH_TIMEOUT") or _DEFAULT_TIMEOUT)
+        except ValueError:
+            timeout = _DEFAULT_TIMEOUT
         limit = max(1, min(int(limit or 5), 20))
 
         body = {
