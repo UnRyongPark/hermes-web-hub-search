@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+- One request now returns the whole retrieved set. The instructions ask the carrier for every
+  distinct hit the hosted tool produced (up to `HUB_SEARCH_MAX_RESULTS`, default 15) instead of
+  the citation subset it would otherwise pick, which had capped every search at 5 rows no matter
+  what the caller asked for. Measured 10/10 and 5/5 filled in a single round trip.
+- Default carrier moves to `opencode-go/gpt-6-luna`: the same model on the hub's `openai` lane took
+  20-27 s for ten results that this lane returned in 11-15 s.
+- Knobs are dotenv-first and the `load_env()` memo is dropped per search. The gateway copies `.env`
+  into `os.environ` at boot, where it outranks the file, so edits used to need a gateway restart.
+- Usage log records `model`, so a lane change is visible in the log instead of inferred from timing.
+
 ## 1.1.0
 
 - Carry the hosted search on a native GPT route. `combo/*` aliases are translated, so the hub

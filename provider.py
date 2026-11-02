@@ -6,11 +6,20 @@ declares the hosted tool and therefore cannot run client-side), this provider ha
 ``search()`` implementation, so the same code path serves both the model's ``web_search``
 tool call and programmatic callers (``execute_code``, subagents, cron).
 
+The carrier model must sit on a *native passthrough* route (a bare ``gpt-*`` id). A
+translated route such as ``combo/*`` makes the hub emulate the hosted tool with a sidecar
+loop — one helper-model call plus one search per rewritten query — which measured 119-150 s
+against 13-19 s here (see README).
+
+One call returns the whole retrieved set, not a cited subset: the instructions ask for every
+distinct result the hosted tool returned (up to HUB_SEARCH_MAX_RESULTS), which is what fills
+the caller's ``limit`` in a single round trip.
+
 Env (optional):
-  HUB_SEARCH_BASE   default http://192.168.1.116:10100
-  HUB_SEARCH_MODEL  default combo/ds41f
-  HUB_SEARCH_TIMEOUT default 180 (seconds, soft deadline; hub sidecar searches
-                    legitimately take 35-150s, see README)
+  HUB_SEARCH_BASE         default http://192.168.1.116:10100
+  HUB_SEARCH_MODEL        default gpt-6-luna (cheapest carrier measured at the hub)
+  HUB_SEARCH_TIMEOUT      default 90 (seconds, soft deadline)
+  HUB_SEARCH_MAX_RESULTS  default 20 (cap on results requested from the carrier)
 """
 
 from __future__ import annotations
@@ -34,14 +43,24 @@ logger = logging.getLogger(__name__)
 _pruned_on: date | None = None
 
 _DEFAULT_BASE = "http://192.168.1.116:10100"
-_DEFAULT_MODEL = "combo/ds41f"
-_DEFAULT_TIMEOUT = 180.0
+_DEFAULT_MODEL = "gpt-6-luna"
+_DEFAULT_TIMEOUT = 90.0
+_DEFAULT_MAX_RESULTS = 15
 
-_INSTRUCTIONS = (
-    "You are a web search backend. Use the web search tool for the query, then reply with ONLY a "
-    'JSON array of objects {"title", "url", "snippet"} — snippet at most 20 words, taken from the '
-    "source. No prose, no markdown fences, no trailing commentary. Never invent URLs."
-)
+
+def _instructions(wanted: int) -> str:
+    """Ask for the whole result set, not the model's citation subset.
+
+    Requesting a cited subset returned 5 rows no matter what the caller asked for; asking for
+    every distinct hit the tool returned filled the same call with 15. The model is told not to
+    filter, summarise or answer — this is a retrieval turn, and the caller does the reading.
+    """
+    return (
+        "You are a web search backend. Run the web search tool for the query. Then output ONLY a JSON "
+        'array of objects {"title", "url", "snippet"}, one per distinct result the tool returned, in '
+        f"the order returned, up to {wanted}. Do not filter for relevance, do not summarise, do not "
+        "answer the query, no prose, no markdown fences, no trailing commentary. Never invent URLs."
+    )
 
 
 def _profile_env_files() -> list[Path]:
@@ -189,7 +208,7 @@ def _profile_name() -> str:
         return os.environ.get("HERMES_PROFILE", "").strip() or "default"
 
 
-def _log_usage(query: str, limit: int, result: dict[str, Any], elapsed: float) -> None:
+def _log_usage(query: str, limit: int, result: dict[str, Any], elapsed: float, model: str = "") -> None:
     """Append one JSONL line per search for ``hub-search stats`` / dashboards.
 
     Best effort: analytics must never break a search.
@@ -203,6 +222,7 @@ def _log_usage(query: str, limit: int, result: dict[str, Any], elapsed: float) -
         # Hermes asks for a bucketed fetch count (e.g. a request for 2 arrives as 10) and
         # slices the caller's share afterwards, so this is the fetch size, not the ask.
         "fetch_limit": int(limit),
+        "model": model,
         "ok": ok,
         "results": hits,
         "elapsed": round(elapsed, 2),
@@ -245,30 +265,57 @@ class HubSearchProvider(WebSearchProvider):
         except Exception as exc:  # never let a provider bug escape into the tool layer
             logger.warning("hub-search crashed: %s", exc)
             result = _search_fail(f"hub search crashed: {exc}")
-        _log_usage(query, limit, result, time.time() - started)
+        model = str(result.pop("_model", "") or "")
+        _log_usage(query, limit, result, time.time() - started, model)
         return result
 
     def _run_search(self, query: str, limit: int = 5) -> dict[str, Any]:
         key = _api_key()
         if not key:
             return _search_fail("OPENCODEX_HERMES_GPT_API_KEY is not set for this profile")
-        # get_provider_env reads the profile .env through the config layer on every call, so
-        # a timeout change lands in a running gateway without restarting it.
-        base = (get_provider_env("HUB_SEARCH_BASE") or _DEFAULT_BASE).rstrip("/")
-        model = get_provider_env("HUB_SEARCH_MODEL") or _DEFAULT_MODEL
+        # load_env() memoises the .env file per process, so a long-lived gateway would keep
+        # serving the values it booted with. Drop the cache first: retuning the carrier or the
+        # deadline then lands on the next search instead of on the next restart.
+        def setting(name: str) -> str:
+            """Read a knob so the profile's .env wins, every call.
+
+            Two caches stand between this provider and a retuned knob: ``load_env()`` memoises
+            the parsed file, and the gateway copies .env into ``os.environ`` at boot, where it
+            outranks the file for ``get_provider_env``. Dropping the memo and reading
+            dotenv-first means editing .env takes effect on the next search rather than on the
+            next gateway restart.
+            """
+            try:
+                from hermes_cli.config import get_env_value_prefer_dotenv, invalidate_env_cache
+
+                invalidate_env_cache()
+                return (get_env_value_prefer_dotenv(name) or "").strip()
+            except Exception as exc:  # stripped install / early import
+                logger.debug("hub-search dotenv-first lookup unavailable: %s", exc)
+                return (get_provider_env(name) or "").strip()
+
+        base = (setting("HUB_SEARCH_BASE") or _DEFAULT_BASE).rstrip("/")
+        model = setting("HUB_SEARCH_MODEL") or _DEFAULT_MODEL
         try:
-            timeout = float(get_provider_env("HUB_SEARCH_TIMEOUT") or _DEFAULT_TIMEOUT)
+            timeout = float(setting("HUB_SEARCH_TIMEOUT") or _DEFAULT_TIMEOUT)
         except ValueError:
             timeout = _DEFAULT_TIMEOUT
         limit = max(1, min(int(limit or 5), 20))
+        try:
+            fetch = min(max(1, int(get_provider_env("HUB_SEARCH_MAX_RESULTS") or _DEFAULT_MAX_RESULTS)), 25)
+        except ValueError:
+            fetch = _DEFAULT_MAX_RESULTS
+        # Fill the caller's ask rather than over-fetching far past it: every extra row costs
+        # output tokens, and output tokens are what the carrier spends its time generating.
+        fetch = min(fetch, max(limit, 8))
 
         body = {
             "model": model,
             "stream": True,
-            "instructions": _INSTRUCTIONS,
+            "instructions": _instructions(fetch),
             "input": [{"role": "user", "content": query}],
             "tools": [{"type": "web_search"}],
-            "max_output_tokens": max(600, min(2600, 400 + 420 * limit)),
+            "max_output_tokens": max(1200, min(4200, 400 + 180 * fetch)),
         }
         request = urllib.request.Request(
             f"{base}/v1/responses",
@@ -339,4 +386,4 @@ class HubSearchProvider(WebSearchProvider):
                 break
         if not hits:
             return _search_fail("hub returned no results")
-        return {"success": True, "data": {"web": hits}}
+        return {"success": True, "data": {"web": hits}, "_model": model}

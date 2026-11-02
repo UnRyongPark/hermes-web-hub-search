@@ -107,7 +107,7 @@ Roadmap: a small web dashboard and a log viewer over the same JSONL.
 | env | default | meaning |
 | --- | --- | --- |
 | `HUB_SEARCH_BASE` | `http://192.168.1.116:10100` | OpenCodex hub origin |
-| `HUB_SEARCH_MODEL` | `gpt-6-luna` | model that carries the hosted tool call — must be a native passthrough (see Trade-offs) |
+| `HUB_SEARCH_MODEL` | `opencode-go/gpt-6-luna` | model that carries the hosted tool call — must be a native passthrough (see Trade-offs) |
 | `HUB_SEARCH_TIMEOUT` | `90` | soft deadline in seconds, measured from the request |
 | `HUB_SEARCH_LOG` | `~/.hermes/shared/hub-search/usage.jsonl` | usage log path |
 | `HUB_SEARCH_KEY` | _(profile provider block)_ | explicit hub key override |
@@ -134,6 +134,16 @@ Credentials: `OPENCODEX_HERMES_GPT_API_KEY` from the environment, the active pro
 - `HUB_SEARCH_TIMEOUT` must cover source arrival, not the answer. 90 s is ample for a native
   carrier and still bounds a hung stream.
 - Hermes' tool-level memo cache serves repeats instantly.
+- **Breadth comes from the ask, not from a second pass.** Instructing the carrier to return the
+  cited subset yielded 5 rows however many the caller wanted; instructing it to return every
+  distinct hit the tool produced filled the same single call with 10-15. So one request covers
+  both the fast path and the wide path: 10-15 s for 10 results, 10-13 s for 5.
+- **Carrier choice is worth re-measuring per lane.** The same `gpt-6-luna` served over the hub's
+  `openai` provider took 20-27 s for the same ten results that `opencode-go` returned in 11-15 s,
+  so the default points at the `opencode-go` lane. Re-time both when either lane changes.
+- **Env knobs are dotenv-first.** The gateway copies `.env` into `os.environ` at boot, where it
+  outranks the file, and `load_env()` memoises the parse. The provider drops that memo and reads
+  dotenv-first so retuning takes effect on the next search, not the next gateway restart.
 - **Snippets**: when the soft deadline fires, only source titles/URLs are returned.
 - **Cost**: a search is a full model round trip on the hub, so it is billed like any
   other call. With `openai-native` the same search was inlined into the answering turn.
