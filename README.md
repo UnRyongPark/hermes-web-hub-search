@@ -1,5 +1,10 @@
 # hermes-web-hub-search
 
+> **Moved.** This provider now lives in
+> [`agent-opencode-hub-search/hermes`](https://github.com/UnRyongPark/agent-opencode-hub-search/tree/main/hermes),
+> alongside the OpenClaw provider. This repository is archived and gets no
+> further updates.
+
 **When you put OpenCodex behind Hermes, this plugin hands Hermes' search to Codex.**
 
 It is a Hermes Agent web-search provider: every search runs **on the OpenAI subscription**
